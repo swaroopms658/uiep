@@ -113,7 +113,7 @@ def chat_with_data(request: ChatRequest, db: Session = Depends(get_db)):
                     "content": prompt,
                 }
             ],
-            model="llama-3.3-70b-versatile",
+            model="llama3-8b-8192",
         )
         return ChatResponse(answer=chat_completion.choices[0].message.content.strip())
     except Exception as e:
