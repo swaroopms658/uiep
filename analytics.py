@@ -117,4 +117,16 @@ def chat_with_data(request: ChatRequest, db: Session = Depends(get_db)):
         )
         return ChatResponse(answer=chat_completion.choices[0].message.content.strip())
     except Exception as e:
+        print(f"Groq API Error: {str(e)}")
         return ChatResponse(answer="Sorry, I couldn't process your request right now.")
+
+@router.delete("/reset")
+def reset_database(db: Session = Depends(get_db)):
+    """Deletes all transactions from the database for testing logic."""
+    try:
+        db.query(models.Transaction).delete()
+        db.commit()
+        return {"status": "success", "message": "All transactions deleted."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
