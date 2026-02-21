@@ -32,6 +32,10 @@ def process_pdf_background(job_id: str, file_path: str):
         job.total_pages = total_pages
         db.commit()
         
+        # Clear existing transactions for this MVP prototype to prevent infinite sum stacking
+        db.query(models.Transaction).delete()
+        db.commit()
+        
         all_transactions = []
         CHUNK_SIZE = 50
         
