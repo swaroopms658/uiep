@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import List, Optional
 from pydantic import BaseModel
 import models
@@ -28,7 +28,10 @@ class DashboardResponse(BaseModel):
 
 class Insight(BaseModel):
     type: str
-    description: str
+    merchant: str
+    category: Optional[str]
+    count: int
+    avg_amount: float
     amount_impact: float
 
 
@@ -136,30 +139,17 @@ def get_insights(
     for row in freq_rows:
         merchant, count, total, category = row
         avg_amount = total / count
-
-        if category in ESSENTIAL:
-            insights.append(
-                Insight(
-                    type="regular_expense",
-                    description=(
-                        f"{merchant} is a regular essential expense "
-                        f"({count} payments, Rs.{total:.0f} total, avg Rs.{avg_amount:.0f}/visit)."
-                    ),
-                    amount_impact=total,
-                )
+        insight_type = "regular_expense" if category in ESSENTIAL else "high_frequency"
+        insights.append(
+            Insight(
+                type=insight_type,
+                merchant=merchant,
+                category=category,
+                count=int(count),
+                avg_amount=round(avg_amount, 2),
+                amount_impact=round(total, 2),
             )
-        else:
-            insights.append(
-                Insight(
-                    type="high_frequency",
-                    description=(
-                        f"You spent at {merchant} {count} times "
-                        f"(avg Rs.{avg_amount:.0f}/visit, Rs.{total:.0f} total). "
-                        "Consider if you can reduce this."
-                    ),
-                    amount_impact=total,
-                )
-            )
+        )
 
     cache_set(cache_key, [i.model_dump() for i in insights])
     return insights
