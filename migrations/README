@@ -1,0 +1,7 @@
+Run migrations from the `backend` directory.
+
+Common commands:
+
+- `alembic upgrade head`
+- `alembic revision --autogenerate -m "describe change"`
+- `alembic downgrade -1`

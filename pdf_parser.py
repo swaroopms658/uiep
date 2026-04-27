@@ -5,6 +5,26 @@ import io
 import re
 from datetime import datetime
 
+DATE_PATTERN = re.compile(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$')
+TRANSACTION_BOUNDARY_PATTERN = re.compile(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$')
+_ACCOUNT_REF = re.compile(r'\s+(Paid|Received|Debited|Credited)\s+(by|to).*$', re.IGNORECASE)
+
+
+def parse_statement_date(date_str: str) -> datetime | None:
+    try:
+        return datetime.strptime(date_str, "%b %d, %Y")
+    except ValueError:
+        return None
+
+
+def extract_reference_id(lines: list[str]) -> str | None:
+    for line in lines:
+        if line.startswith(("Transaction ID", "Bank Reference", "UTR No")):
+            _, _, value = line.partition(":")
+            reference = value.strip() or line.split()[-1].strip()
+            return reference[:255] if reference else None
+    return None
+
 def extract_text_from_page(page: fitz.Page) -> str:
     """Extract text from a PDF page, falling back to OCR if needed."""
     text = page.get_text("text")
@@ -35,9 +55,10 @@ def parse_upi_transactions(text: str) -> list:
         line = lines[i]
         
         # Look for the start of a transaction block: Date string like "Feb 21, 2026"
-        if re.match(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$', line):
+        if DATE_PATTERN.match(line):
             try:
                 date_str = line
+                txn_date = parse_statement_date(date_str)
                 txn_type = lines[i+2].upper() # e.g. "DEBIT" or "CREDIT"
                 
                 if txn_type not in ["DEBIT", "CREDIT"]:
@@ -53,8 +74,21 @@ def parse_upi_transactions(text: str) -> list:
                 
                 j = i + 5
                 merchant_lines = []
-                while j < len(lines) and not lines[j].startswith("Transaction ID") and not lines[j].startswith("Bank Reference") and not lines[j].startswith("UTR No") and not re.match(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$', lines[j]):
-                    merchant_lines.append(lines[j])
+                metadata_lines = []
+                while (
+                    j < len(lines)
+                    and not TRANSACTION_BOUNDARY_PATTERN.match(lines[j])
+                ):
+                    line_j = lines[j]
+                    if line_j.startswith(("Transaction ID", "Bank Reference", "UTR No")):
+                        metadata_lines.append(line_j)
+                        j += 1
+                        continue
+                    # Skip account-reference lines like "Paid by XX6239", "Credited to XX1234"
+                    if re.match(r'^(Paid|Received|Debited|Credited)\s+(by|to)\s+XX\d+', line_j):
+                        j += 1
+                        continue
+                    merchant_lines.append(line_j)
                     j += 1
                 
                 merchant_tail = " ".join(merchant_lines).strip()
@@ -66,17 +100,18 @@ def parse_upi_transactions(text: str) -> list:
                     description = direction_str + (" " + merchant_tail if merchant_tail else "")
                     merchant = description.replace("Paid to", "").replace("Received from", "").replace("Sent to", "").strip()
                 
+                merchant = _ACCOUNT_REF.sub('', merchant).strip()
                 if not merchant:
                     merchant = "Unknown"
                     
                 transactions.append({
-                    "txn_date": date_str,  # Needs actual conversion to datetime object later
+                    "txn_date": txn_date,
                     "description": description[:255],
                     "merchant": merchant[:255],
                     "amount": amount,
                     "txn_type": txn_type,
                     "category": None,
-                    "upi_id": None,
+                    "upi_id": extract_reference_id(metadata_lines),
                     "is_recurring": False
                 })
                 i = j # Skip to the next transaction block or metadata
