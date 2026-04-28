@@ -7,6 +7,7 @@ from datetime import datetime
 
 DATE_PATTERN = re.compile(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$')
 TRANSACTION_BOUNDARY_PATTERN = re.compile(r'^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$')
+TIME_PATTERN = re.compile(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM|am|pm)?$')
 _ACCOUNT_REF = re.compile(r'\s+(Paid|Received|Debited|Credited)\s+(by|to).*$', re.IGNORECASE)
 
 
@@ -15,6 +16,24 @@ def parse_statement_date(date_str: str) -> datetime | None:
         return datetime.strptime(date_str, "%b %d, %Y")
     except ValueError:
         return None
+
+
+def parse_statement_time(time_str: str) -> tuple[int, int, int] | None:
+    """Parse '3:45 PM', '15:45', '03:45:22 AM' → (hour, minute, second). Returns None if malformed."""
+    m = TIME_PATTERN.match(time_str.strip())
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    second = int(m.group(3) or 0)
+    ampm = (m.group(4) or "").upper()
+    if ampm == "PM" and hour < 12:
+        hour += 12
+    elif ampm == "AM" and hour == 12:
+        hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        return None
+    return hour, minute, second
 
 
 def extract_reference_id(lines: list[str]) -> str | None:
@@ -59,6 +78,12 @@ def parse_upi_transactions(text: str) -> list:
             try:
                 date_str = line
                 txn_date = parse_statement_date(date_str)
+                # Line i+1 typically holds the time (e.g. "3:45 PM"). Skip silently on miss → midnight.
+                if txn_date is not None and i + 1 < len(lines):
+                    time_parts = parse_statement_time(lines[i + 1])
+                    if time_parts:
+                        h, m, s = time_parts
+                        txn_date = txn_date.replace(hour=h, minute=m, second=s)
                 txn_type = lines[i+2].upper() # e.g. "DEBIT" or "CREDIT"
                 
                 if txn_type not in ["DEBIT", "CREDIT"]:

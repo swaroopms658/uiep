@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
@@ -33,6 +34,7 @@ class Insight(BaseModel):
     count: int
     avg_amount: float
     amount_impact: float
+    last_txn_at: Optional[datetime] = None
 
 
 class ChatRequest(BaseModel):
@@ -125,6 +127,7 @@ def get_insights(
             func.sum(models.Transaction.amount).label("total"),
             # Use the most common category for this merchant
             func.max(models.Transaction.category).label("category"),
+            func.max(models.Transaction.txn_date).label("last_txn_at"),
         )
         .filter(
             models.Transaction.user_id == current_user.id,
@@ -137,7 +140,7 @@ def get_insights(
     )
 
     for row in freq_rows:
-        merchant, count, total, category = row
+        merchant, count, total, category, last_txn_at = row
         avg_amount = total / count
         insight_type = "regular_expense" if category in ESSENTIAL else "high_frequency"
         insights.append(
@@ -148,6 +151,7 @@ def get_insights(
                 count=int(count),
                 avg_amount=round(avg_amount, 2),
                 amount_impact=round(total, 2),
+                last_txn_at=last_txn_at,
             )
         )
 
